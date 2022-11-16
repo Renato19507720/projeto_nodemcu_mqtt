@@ -1,0 +1,238 @@
+<!-- 
+Author: Keven Anthony Leite Siqueira
+Descrição: Exemplo de cliente MQTT para enviar e receber mensagens
+-->
+
+
+<!DOCTYPE HTML>
+<html>
+   <head>
+
+  <!-- Latest compiled and minified Bootstrap CSS -->
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+
+  <!-- Include JQuery library from CDN -->
+  <script src="https://code.jquery.com/jquery-3.1.1.min.js" integrity="sha256-hVVnYaiADRTO2PzUGmuLJr8BLUSjGIZsDYGmIJLv2b8=" crossorigin="anonymous"></script>
+
+  <!-- Include Paho JavaScript MQTT Client from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.js" type="text/javascript"></script>
+  
+<style>
+
+  #IdConsole{
+    top: 0px;
+    left: -1825px;
+  }
+  #BotConecta{
+    left: -110px;
+  }
+  #BotLiga{
+    left: -110px;
+  }
+  #BotDesliga{
+    left: -110px;
+  }
+  #BotInverte{
+    left: -110px;
+  }
+  #VarName{
+    position: relative;
+    height: 32px;
+    width: 50px;
+    font-size: 24px;
+  }
+  #VarValue{
+    position: relative;
+    border-width: 1px;
+    border-color: black;
+    border-style: solid ;
+    height: 32px;
+    width: 200px;
+    font-size: 24px;
+  }
+  #VarName, #VarValue
+  {
+      display:inline;
+  }
+  #txtAr_Console{
+    position: relative;
+    width: 500px;
+    left: 240px;
+  }
+  #IdConsole{
+    position: relative;
+    width: 500px;
+    left: 220px;
+    top: 25px;
+  }
+  #btn_Clear_Console{
+    position: relative;
+    left: 535px;
+  }
+  #block_container
+  {
+      text-align:center;
+  }
+
+</style>
+
+  <script type="text/javascript">
+
+    //  Variables
+    var WebSocket_MQTT_Broker_URL = "ws://broker.hivemq.com:8000/mqtt"; // URL BROKER
+    var MQTT_Client_ID = ""; // NÃO MODIFICAR GERA AUTOMATICAMENTE
+    var MQTT_Client = ""; //NÃO MODIFICAR
+
+    var Topic_Subscribe = "T_MQTT_RBS_TX01"; // QUAL TOPICO DESEJA RECEBER INFORMAÇÕES QUE APARECEM NO CONSOLE
+    var Topic_Publish = "T_MQTT_RBS_RX01"; // QUAL TOPICO DESEJA LIGAR E DESLIGAR O LED
+
+
+    function mqtt_Connect_with_Broker(){
+      MQTT_Client = new Paho.MQTT.Client(WebSocket_MQTT_Broker_URL, MQTT_Client_ID);
+
+      // set callback handlers
+      MQTT_Client.onConnectionLost = onConnectionLost;
+      MQTT_Client.onMessageArrived = onMessageArrived;
+
+      MQTT_Client.connect({onSuccess:onConnect});
+
+      console.log("Conectado MQTT: " + WebSocket_MQTT_Broker_URL + ", " + MQTT_Client_ID);
+    }
+    // Subscribe to MQTT Topic
+    function mqtt_Subscribe_to_Topic(){
+      MQTT_Subscribe_Topic = Topic_Subscribe; 
+      MQTT_Client.subscribe(MQTT_Subscribe_Topic);
+     // Set_New_Console_Msg("Inscrito no Topico MQTT: " + "\"" + MQTT_Subscribe_Topic + "\"" );
+      console.log("Conectado SUBSCRIBE: " + MQTT_Subscribe_Topic );
+      mqtt_Publish_LeituraConst();
+    }
+//------------------------Botao Liga Desliga----------------------------
+    // Send MQTT Message 
+    function mqtt_Publish_LigaBomba(){
+      message = new Paho.MQTT.Message("LigaBomba");
+      console.log(message);
+      console.log(Topic_Publish);
+      message.destinationName = Topic_Publish.toString();
+      console.log(message.destinationName);
+      MQTT_Client.send(message);
+      //Set_New_Console_Msg("Mensagem enviada: " + "\"" + "LigaLed " + "\"" );
+    }
+//------------------------Botao Liga Desliga----------------------------
+    // Send MQTT Message 
+    function mqtt_Publish_LeituraConst(){
+      message = new Paho.MQTT.Message("LeituraConst");
+      console.log(message);
+      console.log(Topic_Publish);
+      message.destinationName = Topic_Publish.toString();
+      console.log(message.destinationName);
+      MQTT_Client.send(message);
+      //Set_New_Console_Msg("Mensagem enviada: " + "\"" + "LigaLed " + "\"" );
+    }
+//-------------------------------------------------------------------
+    // called when the client connects
+    function onConnect() {
+      // Once a connection has been made, make a subscription and send a message.
+    //  Set_New_Console_Msg("Conectado com o Broker MQTT: " + "\"" + "broker.hivemq.com"+ "\"");
+    }
+
+    // called when the client loses its connection
+    function onConnectionLost(responseObject) {
+      if (responseObject.errorCode !== 0) {
+       // Set_New_Console_Msg("Conexao perdida com o Broker MQTT. Error: " + "\"" +responseObject.errorMessage + "\"");
+      }
+    }
+
+    // called when a message arrives
+    function onMessageArrived(message) {
+     // Set_New_Console_Msg("Messagem recebida: " + "\"" +  message.payloadString + "\"");
+      var VarValue = document.querySelector("#VarValue"); // PEGA A DIV DO VALOR
+      VarValue.innerHTML = message.payloadString; // ESCREVE NA DIV O VALOR
+    } 
+
+    // Document Ready Event
+    $(document).ready( function() {
+      gen_MQTT_Client_ID();
+      mqtt_Connect_with_Broker();
+    })
+
+
+    // Set MQTT Messages to TextArea
+    function Set_New_Console_Msg(text) {
+      document.getElementById("txtAr_Console").value = document.getElementById("txtAr_Console").value + get_Fromatted_Time().toString() + ":  " + text + "\n";
+      document.getElementById("txtAr_Console").scrollTop = document.getElementById("txtAr_Console").scrollHeight;
+    }
+
+    //Clear Console
+    function clear_Console(){
+      document.getElementById("txtAr_Console").value = "";
+    }
+
+    // Get Formatted time in Hour:Minute:Seconds AM/PM format
+    function get_Fromatted_Time() {
+      var dt = new Date();
+      var hours = dt.getHours() == 0 ? "12" : dt.getHours() > 12 ? dt.getHours() - 12 : dt.getHours();
+      var minutes = (dt.getMinutes() < 10 ? "0" : "") + dt.getMinutes();
+      var seconds = dt.getSeconds();
+      var ampm = dt.getHours() < 12 ? "AM" : "PM";
+      var formattedTime = hours + ":" + minutes + ":" + seconds + " " + ampm;
+      return formattedTime;
+    }
+    // Randomly generate Client ID
+    function gen_MQTT_Client_ID(){
+      MQTT_Client_ID = "FAM_EE_" + Math.floor(10000000 + Math.random() * 90000000);
+    }
+
+</script>
+
+</head>
+<body>
+<center>
+<table border ="0" width="100%">
+  </tr>
+    <td bgcolor = "#0A3A3A" width="70%">
+      <center><font color =white><h1>Sistema de Irrigação Remota <br>a partir do NodeMCU e o protocolo MQTT</h1>
+      <h2> UNIVERSIDADE PRESBITERIANA MACKENZIE <br>
+      Faculdade de Computação e Informática </h2>
+      Autor: Renato Barbosa de Souza <br> Professor: Wallace Rodrigues de Santana </font>
+      </center>
+    </td>
+  </tr>		
+</table>
+<!----------------------------CONECTA----------------------->
+<hr>
+  <form class="form-horizontal">
+    <div class="form-group">
+      <div class="col-sm-9">
+      </div>
+    </div>
+    <div class="form-group">
+      <div class="col-sm-6">
+      </div>
+      <div class="col-sm-4" id="BotConecta">
+         <button type="button" class="btn btn-success col-sm-4" id="btn_Connect_to_Broker" onclick="mqtt_Subscribe_to_Topic();">Conecta</button>
+      </div>
+    </div>
+    <hr>
+    <div id="block_container">
+      <div id="VarName">Umid.: </div> 
+      <div id="VarValue">.  ----  .</div>
+    </div>
+<!-------------------------------------------------------------->
+    <hr>
+    <form class="form-horizontal">
+<!-------------TOPICO PUBLISH----------------------->
+    <div class="form-group">
+      <div class="col-sm-6">
+      </div>
+    </div>
+<!------------MENSAGEM A ENVIAR LIGALED---------------->
+    <div class="form-group">
+      <div class="col-sm-6">
+      </div>
+      <div class="col-sm-4" id="BotLiga">
+        <button type="button" class="btn btn-primary col-sm-4"  onclick="mqtt_Publish_LigaBomba();" >LIGA BOMBA</button>
+      </div>
+    </div>
+  </form>
+ </body>
+</html>
