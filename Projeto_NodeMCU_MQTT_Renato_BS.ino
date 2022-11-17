@@ -1,0 +1,312 @@
+/*-----------------------------------------------------------------------------------------
+                            Programa do Projeto NodeMCU MQTT
+  Autor/Aluno: Renato Barbosa de Souza
+  prof.: Wallace Rodrigues de Santana
+  UNIVERSIDADE PRESBITERIANA MACKENZIE
+  Faculdade de Computação e Informática
+  Data: 08 de novembro de 2022
+-------------------------------------------------------------------------------------------*/
+#include <ESP8266WiFi.h> // Importa a Biblioteca ESP8266WiFi
+#include <PubSubClient.h> // Importa a Biblioteca PubSubClient
+#include <Wire.h>
+#include "SSD1306Wire.h"
+
+//defines - mapeamento de pinos do NodeMCU
+#define D0    16
+#define D1    5
+#define D2    4
+#define D3    0
+#define D4    2
+#define D5    14
+#define D6    12
+#define D7    13
+#define D8    15
+#define D9    3
+#define D10   1
+#define SD2   9
+#define SD3   10
+
+#define Led1_PIN D0 // pino do led1 interno ao NodeMCU
+#define Led2_PIN D4 // pino do led2 interno ao NodeMCU
+#define Bot_PIN SD3  // pino do botão
+#define Bomba_PIN D3  // pino da Bomba d'água
+
+// define id mqtt e tópicos para publicação e inscrição
+#define TOPICO_SUBSCRIBE1 "T_MQTT_RBS_RX01"     //tópico MQTT de entrada 1
+#define TOPICO_PUBLISH1 "T_MQTT_RBS_TX01"     //tópico MQTT de saída 1
+#define ID_MQTT  "ID_ProjMQTT_Renato_2022_v01"       //id mqtt (para identificação de sessão)
+                                                     //IMPORTANTE: este deve ser único no broker
+const char* SSID = "NOME_DA_REDE"; // SSID / nome da rede WI-FI que deseja se conectar
+const char* PASSWORD = "SENHA"; // Senha da rede WI-FI que deseja se conectar
+
+// MQTT
+const char* BROKER_MQTT = "broker.hivemq.com"; //URL do broker MQTT que se deseja utilizar
+int BROKER_PORT = 1883; // Porta do Broker MQTT
+ 
+WiFiClient espClient; // Cria o objeto espClient
+PubSubClient MQTT_Client(espClient); // Instancia o Cliente MQTT passando o objeto espClient
+
+// Inicializa o display Oled
+SSD1306Wire  display(0x3c, D1, D2); // SDA => D1    SCL => D2
+
+char DadoRX, Pck[30], Buff[10];
+uint16_t n, CntDado, CntLed, CntBot, CntDebounce, CntBomba, CntDisplay, CntSensor, CntAmostra; 
+int UmidRel;
+bool Bot, FLAG_LIGABOMBA, FLAG_APAGAR_DISPLAY, FLAG_LEITURA_CONST;
+unsigned long int Amostra;
+
+void setup(){
+//----------- Inicializa Serial -------------------------
+  Serial.begin(115200);
+  delay(100);
+//-------------- Piscadas de Boas Vindas ------------------
+  pinMode(Bot_PIN, INPUT_PULLUP); 
+  pinMode(Bomba_PIN, OUTPUT);
+  digitalWrite(Bomba_PIN, LOW);  // desliga a bomba inicialmente
+  
+  pinMode(Led1_PIN, OUTPUT); // São do tipo NF
+  pinMode(Led2_PIN, OUTPUT);
+  digitalWrite(Led1_PIN, HIGH);
+  digitalWrite(Led2_PIN, LOW);
+  for(n=0; n<20; n++){
+    digitalWrite(Led1_PIN, !digitalRead(Led1_PIN));
+    digitalWrite(Led2_PIN, !digitalRead(Led2_PIN));
+    delay(50);
+  }
+  digitalWrite(Led2_PIN, HIGH);
+//-------------- Imrpime texto inicial ------------------  
+  Serial.print("\nProjeto MQTT-NodeMCU Renato Barbosa de Souza");
+  Serial.println("\nTopico Subscribe (inscrito):");
+  Serial.println(TOPICO_SUBSCRIBE1);
+  Serial.println("\nTopico Publish (de publicar):");
+  Serial.println(TOPICO_PUBLISH1);
+  Serial.println("\n------Conexao WI-FI------");
+  Serial.print("=>Conectando-se na rede: ");
+  Serial.println(SSID);
+  Serial.print("Aguarde");
+//------------ Inicializa Display OLED ------------------------
+  display.init();
+  display.flipScreenVertically();
+  //Apaga o display
+  display.clear();
+  //Seleciona a fonte // ArialMT_Plain_10, ArialMT_Plain_16, ArialMT_Plain_24
+  display.setFont(ArialMT_Plain_10);
+  display.drawString(30, 0, "Projeto MQTT");
+  display.drawString(0, 25, "Umidade Relativa: xxx %");
+  display.display();
+//---------- Inicializa WiFi e MQTT ------------------------
+  reconectWiFi();
+  MQTT_Client.setServer(BROKER_MQTT, BROKER_PORT); //informa qual broker e porta deve ser conectado
+  MQTT_Client.setCallback(mqtt_callback);          //atribui função de callback (função chamada quando qualquer informação de um dos tópicos subescritos chega)
+  
+  VerificaConexoesWiFIEMQTT();
+}
+
+void loop(){
+//---------------- Tarefa 1: Pisca led ------------------------------
+  if(CntLed) CntLed--;
+  else{
+    if(FLAG_APAGAR_DISPLAY) CntLed=10;
+    else CntLed=100;
+    digitalWrite(Led1_PIN, !digitalRead(Led1_PIN));
+  }
+//---------------- Tarefa 2: RX Serial ------------------------------  
+  Tarefa2_RX_Serial();
+//---------------- Tarefa 3: Bomba ------------------------------
+  Tarefa3_BombaDagua();
+//---------------- Tarefa 4: Display ------------------------------
+  Tarefa4_Display_OLED();
+//---------------- Tarefa 5: Sensor Umidade Solo ------------------------------
+  Tarefa5_Sensor_Humid_Solo();
+//---------------- Tarefa 6: Verifica Conexões ------------------------------
+  VerificaConexoesWiFIEMQTT(); //garante funcionamento das conexões WiFi e ao broker MQTT
+//---------------- Tarefa 7: keep-alive MQTT ------------------------------
+  MQTT_Client.loop(); //keep-alive da comunicação com broker MQTT  (dura aprox. 5 ms)
+//---------------- Tick ------------------------------
+  delay(5);
+}
+
+uint16_t i;
+char mensagem[30];
+
+void mqtt_callback(char* topic, byte* payload, unsigned int length){
+  for(i=0; i<length; i++) mensagem[i]=(char)payload[i];
+  mensagem[i]='\0';
+  if(((String)mensagem).equals("LigaBomba")){
+    Serial.println("Recebido comando LigaBomba");
+    FLAG_LIGABOMBA=1;
+  }else if(((String)mensagem).equals("LeituraUnica")){
+    Serial.println("Recebido comando LeituraUnica");
+    sprintf(Buff, "%3d", UmidRel);
+    MQTT_Client.publish(TOPICO_PUBLISH1, Buff);
+  }else if(((String)mensagem).equals("LeituraConst")){
+    Serial.println("Recebido comando LeituraConst");
+    FLAG_LEITURA_CONST=1;
+  }
+  
+  Serial.print("Topico: ");
+  Serial.print(topic);
+  Serial.print("\n");
+  Serial.print("Mensagem: ");
+  Serial.print(mensagem);
+  Serial.print("\n");
+  display.drawString(0, 40, "Msg recebida:");
+  display.drawString(0, 50, "==> ");
+  display.drawString(20, 50, mensagem);
+  display.display();
+  FLAG_APAGAR_DISPLAY=1;
+}
+//
+
+void Tarefa2_RX_Serial(void){
+  if(Serial.available()){
+    Pck[0]=Serial.read();
+    for(CntDado=1; CntDado<30; CntDado++){
+      for(n=0;n<2000;n++){
+        if(Serial.available()) break;
+        delayMicroseconds(20);
+      }
+      if(n<2000) Pck[CntDado]=Serial.read();
+      else break;
+    }
+    Pck[CntDado]='\0';
+    MQTT_Client.publish(TOPICO_PUBLISH1, Pck);
+    Serial.print("-> Pacote enviado ao topico ");
+    Serial.print(TOPICO_PUBLISH1);
+    Serial.print(": ");
+    Serial.println(Pck);
+    display.drawString(0, 40, "Msg enviada:");
+    display.drawString(0, 50, "==> ");
+    display.drawString(20, 50, Pck);
+    display.display();
+
+    for(n=0; n<20; n++){
+      digitalWrite(Led1_PIN, !digitalRead(Led1_PIN));
+      delay(50);
+    }
+    delay(2000);
+    ApagaMensagem();
+    display.display();
+  }
+}
+//
+
+void Tarefa3_BombaDagua(void){
+  if(!CntBomba){
+    if(FLAG_LIGABOMBA){
+      digitalWrite(Bomba_PIN, HIGH);  // liga a bomba
+      CntBomba=1000;
+    }
+  }else{
+    CntBomba--;
+    if(!CntBomba){
+      FLAG_LIGABOMBA=0;
+      digitalWrite(Bomba_PIN, LOW);  // desliga a bomba
+    }
+  }
+}
+//
+
+void Tarefa4_Display_OLED(void){
+  if(!CntDisplay){
+    if(FLAG_APAGAR_DISPLAY){
+      CntDisplay=500;
+    }
+  }else{
+    CntDisplay--;
+    if(!CntDisplay){
+      FLAG_APAGAR_DISPLAY=0;
+      ApagaMensagem();
+      display.display();
+    }
+  }
+}
+//
+
+void Tarefa5_Sensor_Humid_Solo(void){
+  if(CntSensor<10) CntSensor++;
+  else{
+    if(CntAmostra<20){
+      CntAmostra++;
+      Amostra += analogRead(A0);
+    }else{
+      Amostra = Amostra/20;
+      UmidRel = map(Amostra,210,510,100,0);
+      if(UmidRel<0) UmidRel=0;
+      if(UmidRel>100) UmidRel=100;
+      
+      for(i=25;i<35;i++){
+        for(n=84;n<104;n++){
+          display.clearPixel(n,i);
+        }
+      }
+      sprintf(Buff, "%3d", UmidRel);
+      display.drawString(86, 25, Buff);
+      display.display();
+      if(FLAG_LEITURA_CONST){
+        sprintf(Buff, "%3d %%", UmidRel);
+        MQTT_Client.publish(TOPICO_PUBLISH1, Buff);
+      }
+      Amostra=0;
+      CntAmostra=0;
+    }
+    CntSensor=0;
+  }
+}
+//
+
+//Função: reconecta-se ao broker MQTT (caso ainda não esteja conectado ou em caso de a conexão cair)
+//        em caso de sucesso na conexão ou reconexão, o subscribe dos tópicos é refeito.
+void reconnectMQTT(){
+  while(!MQTT_Client.connected()){
+    Serial.print("=>Tentando se conectar ao Broker MQTT: ");
+    Serial.println(BROKER_MQTT);
+    if (MQTT_Client.connect(ID_MQTT)){
+      Serial.println("Conectado com sucesso ao broker MQTT!");
+      MQTT_Client.subscribe(TOPICO_SUBSCRIBE1);
+    }else{
+      Serial.println("Falha ao reconectar no broker.");
+      Serial.println("Havera nova tentativa de conexao em 2s");
+      delay(2000);
+    }
+  }
+}
+  
+void reconectWiFi(){
+  //se já está conectado a rede WI-FI, nada é feito. 
+  //Caso contrário, são efetuadas tentativas de conexão
+  if(WiFi.status() == WL_CONNECTED)
+    return;
+       
+  WiFi.begin(SSID, PASSWORD); // Conecta na rede WI-FI
+   
+  while(WiFi.status() != WL_CONNECTED){
+    delay(100);
+    Serial.print(".");
+  }
+ 
+  Serial.println();
+  Serial.print("Conectado com sucesso na rede ");
+  Serial.println(SSID);
+  Serial.print("IP obtido: ");
+  Serial.println(WiFi.localIP());
+}
+ 
+void VerificaConexoesWiFIEMQTT(void){
+  if(!MQTT_Client.connected()) 
+    reconnectMQTT(); //se não há conexão com o Broker, a conexão é refeita
+   
+  reconectWiFi(); //se não há conexão com o WiFI, a conexão é refeita
+}
+
+void ApagaMensagem(void){
+  for(i=42;i<62;i++){
+    for(n=0;n<120;n++){
+      display.clearPixel(n,i);
+    }
+  }
+}
+
+
+//
+//
